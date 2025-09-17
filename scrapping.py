@@ -1,90 +1,68 @@
 import requests
 from bs4 import BeautifulSoup
 import json
-import pandas as pd
+import sys
 
-def web_scrape_to_json(url):
-    """
-    Realiza web scraping en una URL dada para extraer tablas y otros datos,
-    y los guarda en un archivo JSON.
-    
-    Args:
-        url (str): La URL de la página web a scrapear.
-        
-    Returns:
-        bool: True si la operación fue exitosa, False en caso contrario.
-    """
-    
-    # 1. Realizar la solicitud HTTP
+URL = "https://www.futbolfantasy.com/analytics/laliga-fantasy/mercado"
+
+def fetch_players(url: str):
     try:
-        response = requests.get(url, timeout=10)
-        # Lanzar una excepción si la respuesta no es 200 OK
-        response.raise_for_status()  
-        print(f"✅ Conexión exitosa a: {url}")
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Error al acceder a la URL: {e}")
-        return False
-        
-    # 2. Parsear el contenido HTML
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Diccionario para almacenar todos los datos
-    scraped_data = {}
-    
-    # 3. Extraer el título de la página
-    title = soup.find('title')
-    scraped_data['titulo_pagina'] = title.text.strip() if title else 'No se encontró el título'
-    
-    # 4. Encontrar y procesar todas las tablas
-    tables = soup.find_all('table')
-    print(f"🔎 Se encontraron {len(tables)} tabla(s) en la página.")
-    
-    # Iterar sobre cada tabla encontrada
-    for i, table in enumerate(tables):
-        
-        # Encontrar las cabeceras (<th>)
-        headers = [header.text.strip() for header in table.find_all('th')]
-        
-        # Encontrar las filas de datos (<tr>)
-        rows = table.find_all('tr')
-        
-        table_data = []
-        for row in rows:
-            # Encontrar las celdas de datos (<td>)
-            cells = row.find_all('td')
-            # Extraer el texto de cada celda y limpiar espacios
-            row_data = [cell.text.strip() for cell in cells]
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Error en la petición: {e}")
+        sys.exit(1)
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    jugadores = []
+    elementos = soup.select("div.elemento_jugador")
+
+    if not elementos:
+        print("No se encontraron jugadores. ¿Cambió la estructura HTML?")
+        return jugadores
+
+    for el in elementos:
+        try:
+            nombre = el.get("data-nombre")
+            valor_actual = el.get("data-valor1")
+            cambio_valor = el.get("data-diferencia1")
+
+            jugador = {
+                "nombre": nombre,
+                "valor_actual": int(valor_actual) if valor_actual else None,
+                "cambio_valor": int(cambio_valor) if cambio_valor else None,
+            }
+            jugadores.append(jugador)
+        except Exception as e:
+            print(f"Error procesando jugador: {e}")
             
-            # Asegurarse de que los datos de la fila no estén vacíos
-            if row_data:
-                table_data.append(row_data)
+	# Ordenar por cambio_valor (descendente)
+    jugadores = sorted(
+        jugadores,
+        key=lambda x: x["cambio_valor"] if x["cambio_valor"] is not None else 0,
+        reverse=True,
+    )
 
-        scraped_data[f'tabla_{i+1}'] = {
-            'headers': headers,
-            'data': table_data
-        }
-    
-    # 5. Opcional: Extraer enlaces
-    # links = [link.get('href') for link in soup.find_all('a')]
-    # scraped_data['links'] = links
-    
-    # 6. Guardar los datos en un archivo JSON
+    return jugadores
+
+def save_to_file(data, filename="jugadores_laliga_fantasy.json"):
     try:
-        with open('scraped_data.json', 'w', encoding='utf-8') as f:
-            json.dump(scraped_data, f, ensure_ascii=False, indent=4)
-        print("💾 Datos guardados en 'scraped_data.json'")
-        return True
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"Archivo guardado en {filename}")
     except IOError as e:
-        print(f"❌ Error al guardar el archivo: {e}")
-        return False
+        print(f"Error guardando archivo: {e}")
 
-# --- Ejemplo de uso ---
-# Reemplaza esta URL con la página que quieras scrapear.
-# La URL de FutbolFantasy que me diste anteriormente es un buen ejemplo.
-# url_to_scrape = 'https://www.futbolfantasy.com/analytics/laliga-fantasy'
-# web_scrape_to_json(url_to_scrape)
+def main():
+    print("Extrayendo datos de jugadores...")
+    jugadores = fetch_players(URL)
+    if jugadores:
+        # Ejemplo: solo los top 50 (opcional)
+        # jugadores = jugadores[:50]
+        save_to_file(jugadores[:50])
+    else:
+        print("No se pudo extraer información.")
 
-# Puedes usar cualquier URL con tablas
-
-url_to_scrape = 'https://www.futbolfantasy.com/analytics/laliga-fantasy/mercado'
-web_scrape_to_json(url_to_scrape)
+if __name__ == "__main__":
+    main()
